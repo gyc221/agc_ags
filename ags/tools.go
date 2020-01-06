@@ -72,6 +72,33 @@ func myRecv(src net.Conn, needLen int, s []byte) (int, error) {
 	return receivedLen, nil
 }
 
+func myRecvByLen(src net.Conn, s []byte) (int, error) {
+	var b2 [2]byte
+	n, err := myRecv(src, 2, b2[0:])
+	if err != nil || n != 2 {
+		return n, err
+	}
+
+	needLen := int(b2[0])*256 + int(b2[1])
+	n1, err := myRecv(src, needLen, s)
+	return n1, err
+}
+
+func myRecvByLenAndDecode(src net.Conn, s []byte) (int, error) {
+	var b2 [2]byte
+	n, err := myRecv(src, 2, b2[0:])
+	if err != nil || n != 2 {
+		return n, err
+	}
+
+	needLen := int(b2[0])*256 + int(b2[1])
+	n1, err := myRecv(src, needLen, s)
+	if err == nil && n1 == needLen {
+		mydecode(s[0:n1])
+	}
+	return n1, err
+}
+
 func mySend(dst net.Conn, s []byte) (int, error) {
 	needLen := len(s)
 	sendedLen := 0
@@ -87,4 +114,22 @@ func mySend(dst net.Conn, s []byte) (int, error) {
 		}
 	}
 	return sendedLen, nil
+}
+
+func mySendWithLen(dst net.Conn, s []byte) (int, error) {
+	var b2 [2]byte
+	b2[0] = byte(len(s) / 256)
+	b2[1] = byte(len(s) % 256)
+	mySend(dst, b2[0:])
+	return mySend(dst, s)
+}
+
+func mySendWithLenAndEnCode(dst net.Conn, s []byte) (int, error) {
+	var b2 [2]byte
+	b2[0] = byte(len(s) / 256)
+	b2[1] = byte(len(s) % 256)
+	mySend(dst, b2[0:])
+
+	myencode(s)
+	return mySend(dst, s)
 }
