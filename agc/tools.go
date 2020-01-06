@@ -2,8 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -23,20 +21,6 @@ func mydecode(b []byte) {
 	for i := blen - 2; i >= 0; i-- {
 		b[i] ^= b[i+1]
 	}
-}
-
-func uint16ToBytes(n uint16) []byte {
-	data := uint16(n)
-	bytebuf := bytes.NewBuffer([]byte{})
-	binary.Write(bytebuf, binary.BigEndian, data)
-	return bytebuf.Bytes()
-}
-
-func bytesToUInt16(bys []byte) uint16 {
-	bytebuff := bytes.NewBuffer(bys)
-	var data uint16
-	binary.Read(bytebuff, binary.BigEndian, &data)
-	return uint16(data)
 }
 
 func loadConfig(fileName string) (string, string) {
@@ -72,6 +56,7 @@ func loadConfig(fileName string) (string, string) {
 	}
 	return "", ""
 }
+
 func myRecv(src net.Conn, needLen int, s []byte) (int, error) {
 	receivedLen := 0
 	for {
@@ -85,6 +70,33 @@ func myRecv(src net.Conn, needLen int, s []byte) (int, error) {
 		}
 	}
 	return receivedLen, nil
+}
+
+func myRecvByLen(src net.Conn, s []byte) (int, error) {
+	var b2 [2]byte
+	n, err := myRecv(src, 2, b2[0:])
+	if err != nil || n != 2 {
+		return n, err
+	}
+
+	needLen := int(b2[0])*256 + int(b2[1])
+	n1, err := myRecv(src, needLen, s)
+	return n1, err
+}
+
+func myRecvByLenAndDecode(src net.Conn, s []byte) (int, error) {
+	var b2 [2]byte
+	n, err := myRecv(src, 2, b2[0:])
+	if err != nil || n != 2 {
+		return n, err
+	}
+
+	needLen := int(b2[0])*256 + int(b2[1])
+	n1, err := myRecv(src, needLen, s)
+	if err == nil && n1 == needLen {
+		mydecode(s[0:n1])
+	}
+	return n1, err
 }
 
 func mySend(dst net.Conn, s []byte) (int, error) {
@@ -102,4 +114,22 @@ func mySend(dst net.Conn, s []byte) (int, error) {
 		}
 	}
 	return sendedLen, nil
+}
+
+func mySendWithLen(dst net.Conn, s []byte) (int, error) {
+	var b2 [2]byte
+	b2[0] = byte(len(s) / 256)
+	b2[1] = byte(len(s) % 256)
+	mySend(dst, b2[0:])
+	return mySend(dst, s)
+}
+
+func mySendWithLenAndEnCode(dst net.Conn, s []byte) (int, error) {
+	var b2 [2]byte
+	b2[0] = byte(len(s) / 256)
+	b2[1] = byte(len(s) % 256)
+	mySend(dst, b2[0:])
+
+	myencode(s)
+	return mySend(dst, s)
 }

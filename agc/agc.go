@@ -10,8 +10,9 @@ func main() {
 	laddr, raddr := loadConfig("config.ini")
 	if len(laddr) == 0 || len(raddr) == 0 {
 		fmt.Println("load config.ini error!")
+		return
 	}
-	//runtime.GOMAXPROCS(1)
+
 	listener, err := net.Listen("tcp", laddr)
 	if err != nil {
 		fmt.Printf("net.Listen err: %v\n", err)
@@ -33,35 +34,73 @@ func process(client net.Conn, svrAddr string) {
 
 	server, err := net.Dial("tcp", svrAddr)
 	if err != nil {
-		fmt.Printf("connect failed, err : %v\n", err.Error())
+		fmt.Printf("net.Dial failed[%s], err : %v\n", svrAddr, err.Error())
 		return
 	}
 	defer server.Close()
 
-	go myDownCopy(client, server)
-	myUpCopy(server, client)
+	req := MyRequestNew()
+	if !req.ReadAll(client) {
+		return
+	}
+
+	if req.IsHTTPSRequest() {
+		if !writeHTTPSSuccess(client, server, req) {
+			return
+		}
+		go myHTTPSUpCopy(server, client)
+		myDownCopy(client, server)
+	} else {
+		writeFirstHTTPToServer(server, req)
+		go myHTTPUpCopy(server, client)
+		myDownCopy(client, server)
+	}
 }
 
-func myUpCopy(dst net.Conn, src net.Conn) {
+func writeHTTPSSuccess(client net.Conn, server net.Conn, r *MyRequest) bool {
+	_, err := mySend(client, []byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+	if err != nil {
+		fmt.Println("https first wirte response error!")
+		return false
+	}
+	bsHead := []byte(r.addr)
+	_, err = mySendWithLenAndEnCode(server, bsHead)
+	return err == nil
+
+}
+
+func writeFirstHTTPToServer(server net.Conn, r *MyRequest) bool {
+	bsHead := []byte(r.addr)
+	mySendWithLenAndEnCode(server, bsHead)
+
+	bsBody := r.GetBuffer()
+	n, err := mySendWithLenAndEnCode(server, bsBody)
+	return (err == nil && n > 0)
+}
+
+func myHTTPUpCopy(dst net.Conn, src net.Conn) {
+	for {
+		req := MyRequestNew()
+		if !req.ReadAll(src) {
+			break
+		}
+
+		_, err := mySendWithLenAndEnCode(dst, req.GetBuffer())
+		if err != nil {
+			break
+		}
+	}
+}
+
+func myHTTPSUpCopy(dst net.Conn, src net.Conn) {
 	var b [40960]byte
-	var b2 [2]byte
 	for {
 		n, err := src.Read(b[0:])
 		if err != nil || n <= 0 {
 			return
 		}
 
-		b2[0] = byte(n / 256)
-		b2[1] = byte(n % 256)
-		mySend(dst, b2[0:])
-
-		myencode(b[0:n])
-		_, err = mySend(dst, b[0:n])
-
-		// mydecode(b[0:n])
-		// str := string(b[0:n])
-		// fmt.Println(str)
-
+		_, err = mySendWithLenAndEnCode(dst, b[0:n])
 		if err != nil {
 			if io.EOF != err {
 				fmt.Printf("server connetion write error[%v]", err)
@@ -75,24 +114,14 @@ func myUpCopy(dst net.Conn, src net.Conn) {
 
 func myDownCopy(dst net.Conn, src net.Conn) {
 	var b [40960]byte
-	var b2 [2]byte
 	for {
-		n, err := myRecv(src, 2, b2[0:])
-		if err != nil || n != 2 {
-			return
+		n, err := myRecvByLenAndDecode(src, b[0:])
+		if err != nil || n <= 0 {
+			break
 		}
-
-		needLen := int(b2[0])*256 + int(b2[1])
-		n1, err := myRecv(src, needLen, b[0:])
-		if err != nil || n1 != needLen {
-			return
-		}
-
-		mydecode(b[0:n1])
-		//fmt.Println(string(b[0:n1]))
-		_, err = mySend(dst, b[0:n1])
+		_, err = mySend(dst, b[0:n])
 		if err != nil {
-			return
+			break
 		}
 	}
 }
